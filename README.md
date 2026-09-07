@@ -4,6 +4,11 @@ Ein lokaler deutscher Sprachagent für Apple Silicon. Kein Cloud-Anruf, kein
 Tracking, kein gespeichertes Audio — Spracherkennung, Sprachmodell und
 Sprachausgabe laufen alle auf deinem Mac.
 
+Willst du zusätzlich Bilder erzeugen (ComfyUI) und Bilder/PDFs hochladen und
+per Vision auswerten lassen, schau dir den Fork
+**[astra-vision](https://github.com/Jeuners/astra-vision)** zum Antesten an —
+gleiche Basis, plus diese Werkzeuge.
+
 ## Wie es funktioniert
 
 Drei lokale Modelle, verbunden über eine [Pipecat](https://github.com/pipecat-ai/pipecat)-Pipeline:
