@@ -1,0 +1,178 @@
+"use strict";
+const $ = (id) => document.getElementById(id);
+const labels = {listening: "Ich höre dir zu.", responding: "Einen Moment …", speaking: "Astra spricht. Du kannst jederzeit unterbrechen."};
+let peer = null, stream = null, channel = null, pcId = null, heartbeat = null;
+let connecting = false, disconnecting = false, muted = false, ready = false;
+const output = new Audio();
+output.autoplay = true;
+
+function state(value) {
+  document.body.dataset.state = value;
+  $("status").textContent = muted ? "Mikrofon pausiert" : (labels[value] || value);
+}
+function showError(message) {
+  $("error").textContent = message;
+  $("error").hidden = false;
+}
+function addMessage(event) {
+  $("messages").querySelector(".empty")?.remove();
+  const article = document.createElement("article");
+  article.className = `message ${event.role === "user" ? "user" : "assistant"}`;
+  const speaker = document.createElement("span");
+  speaker.className = "speaker";
+  speaker.textContent = event.role === "user" ? "Du" : "Astra";
+  const text = document.createElement("p");
+  text.textContent = event.text;
+  article.append(speaker, text);
+  if (event.interrupted) {
+    const note = document.createElement("small");
+    note.textContent = "Unterbrochen";
+    article.append(note);
+  }
+  $("messages").append(article);
+  while ($("messages").children.length > 80) $("messages").firstElementChild.remove();
+  $("messages").scrollTop = $("messages").scrollHeight;
+}
+function receive(event) {
+  let message;
+  try { message = JSON.parse(event.data); } catch { return; }
+  if (message.type === "state") state(message.state);
+  if (message.type === "partial") $("partial").textContent = message.text;
+  if (message.type === "transcript") addMessage(message);
+  if (message.type === "error") showError(message.message);
+  if (message.type === "metric" && message.name === "llm_ms") {
+    $("latency").textContent = `Erstes Antwortwort · ${(message.value / 1000).toFixed(2)} s`;
+  }
+}
+async function request(path, body, timeout = 20000) {
+  const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body), signal: AbortSignal.timeout(timeout)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Verbindung fehlgeschlagen.");
+  return data;
+}
+async function waitIce(pc) {
+  if (pc.iceGatheringState === "complete") return;
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { cleanup(); reject(new Error("Lokaler Verbindungsaufbau dauert zu lange.")); }, 10000);
+    function cleanup() { clearTimeout(timeout); pc.removeEventListener("icegatheringstatechange", check); }
+    function check() { if (pc.iceGatheringState === "complete") { cleanup(); resolve(); } }
+    pc.addEventListener("icegatheringstatechange", check);
+    check();
+  });
+}
+async function connect() {
+  if (connecting || peer) return;
+  connecting = true;
+  $("error").hidden = true;
+  $("connect").disabled = true;
+  state("Mikrofon wird verbunden …");
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Bitte diese Seite unter http://localhost:7860 öffnen.");
+    stream = await navigator.mediaDevices.getUserMedia({audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1,
+    }, video: false});
+    const pc = new RTCPeerConnection({iceServers: []});
+    peer = pc;
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    channel = pc.createDataChannel("astra");
+    channel.onmessage = receive;
+    channel.onopen = () => {
+      heartbeat = setInterval(() => { if (channel?.readyState === "open") channel.send("ping"); }, 1000);
+    };
+    pc.ontrack = (event) => {
+      output.srcObject = event.streams[0] || new MediaStream([event.track]);
+      output.play().catch(() => showError("Audioausgabe blockiert. Bitte die Audiowiedergabe im Browser erlauben und neu starten."));
+    };
+    pc.onconnectionstatechange = () => {
+      if (peer !== pc) return;
+      if (pc.connectionState === "connected") state("listening");
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !disconnecting) {
+        showError("Verbindung beendet. Du kannst das Gespräch erneut starten.");
+        void disconnect();
+      }
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIce(pc);
+    const answer = await request("/api/offer", {sdp: pc.localDescription.sdp, type: "offer"});
+    pcId = answer.pc_id;
+    await pc.setRemoteDescription({sdp: answer.sdp, type: answer.type});
+    $("connect").textContent = "Gespräch beenden";
+    $("mute").hidden = false;
+    $("clear").textContent = "Neues Gespräch";
+    $("hint").textContent = "Sprich frei. Beim Dazwischenreden hält Astra an.";
+  } catch (error) {
+    await disconnect();
+    const messages = {NotAllowedError: "Mikrofonzugriff nicht erlaubt. Bitte in den Browser-Einstellungen freigeben.",
+      NotFoundError: "Kein Mikrofon gefunden. Bitte ein Mikrofon anschließen.",
+      NotReadableError: "Das Mikrofon ist gerade nicht verfügbar."};
+    showError(messages[error.name] || error.message);
+  } finally {
+    connecting = false;
+    $("connect").disabled = !ready;
+  }
+}
+async function disconnect() {
+  if (disconnecting) return;
+  disconnecting = true;
+  const id = pcId;
+  pcId = null;
+  clearInterval(heartbeat);
+  heartbeat = null;
+  stream?.getTracks().forEach(track => track.stop());
+  stream = null;
+  const oldPeer = peer;
+  peer = null;
+  channel?.close();
+  channel = null;
+  oldPeer?.close();
+  output.pause();
+  output.srcObject = null;
+  muted = false;
+  $("mute").hidden = true;
+  $("mute").setAttribute("aria-pressed", "false");
+  $("mute").textContent = "Mikrofon pausieren";
+  $("connect").textContent = "Gespräch starten";
+  $("clear").textContent = "Verlauf leeren";
+  $("partial").textContent = "";
+  $("hint").textContent = "Mikrofon ist aus. Beim nächsten Start beginnt ein neues Gespräch.";
+  state("Bereit, wenn du es bist.");
+  try { if (id) await request("/api/disconnect", {pc_id: id}, 10000); }
+  catch { showError("Der Server hat das Beenden nicht bestätigt. Das Mikrofon ist aus; bitte kurz warten, bevor du neu startest."); }
+  finally { disconnecting = false; }
+}
+$("connect").addEventListener("click", () => { if (peer) void disconnect(); else void connect(); });
+$("mute").addEventListener("click", () => {
+  muted = !muted;
+  stream?.getAudioTracks().forEach(track => { track.enabled = !muted; });
+  $("mute").setAttribute("aria-pressed", String(muted));
+  $("mute").textContent = muted ? "Mikrofon aktivieren" : "Mikrofon pausieren";
+  state("listening");
+});
+$("clear").addEventListener("click", async () => {
+  const reconnect = Boolean(peer);
+  if (reconnect) await disconnect();
+  $("messages").replaceChildren();
+  if (reconnect) await connect();
+});
+window.addEventListener("pagehide", () => {
+  stream?.getTracks().forEach(track => track.stop());
+  peer?.close();
+});
+async function poll() {
+  try {
+    const response = await fetch("/api/status", {signal: AbortSignal.timeout(5000)});
+    if (!response.ok) throw new Error("Status nicht verfügbar");
+    const status = await response.json();
+    ready = status.ready;
+    if (!peer && !connecting) {
+      $("connect").disabled = !ready;
+      state(ready ? "Bereit, wenn du es bist." : status.stage);
+      if (status.error) showError(status.error);
+    }
+  } catch {
+    ready = false;
+    if (!peer) { $("connect").disabled = true; state("Lokaler Server nicht erreichbar."); }
+  } finally { setTimeout(poll, ready ? 5000 : 1500); }
+}
+void poll();

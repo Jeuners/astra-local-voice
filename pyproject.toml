@@ -1,0 +1,25 @@
+[project]
+name = "astra-local-voice"
+version = "0.1.0"
+description = "Lokaler deutscher Sprachagent für Apple Silicon und Ollama"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pipecat-ai[silero,webrtc,pocket-tts]",
+  "mlx-audio",
+  "fastapi",
+  "uvicorn",
+  "httpx",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "playwright", "ruff"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
