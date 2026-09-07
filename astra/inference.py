@@ -35,7 +35,7 @@ class Models:
         self.tts_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="astra-tts")
         self.stt = None
         self.tts = None
-        self.voice = None
+        self.voice_cache: dict[str, dict] = {}
 
     def load_stt(self):
         from mlx_audio.stt import load
@@ -51,7 +51,12 @@ class Models:
         from pocket_tts import TTSModel
 
         self.tts = TTSModel.load_model(language=self.settings.tts_language)
-        self.voice = self.tts.get_state_for_audio_prompt(self.settings.voice)
+
+    def get_voice(self, name: str) -> dict:
+        """Compute (or reuse) one voice's conditioning state. Runs on tts_executor."""
+        if name not in self.voice_cache:
+            self.voice_cache[name] = self.tts.get_state_for_audio_prompt(name)
+        return self.voice_cache[name]
 
     async def close(self):
         await asyncio.to_thread(self.stt_executor.shutdown, wait=True, cancel_futures=True)

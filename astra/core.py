@@ -13,6 +13,7 @@ class Settings:
     voice: str = "alba"
     port: int = 7860
     context_tokens: int = 4096
+    tailnet_host: str | None = None
 
     @classmethod
     def from_env(cls):
@@ -23,7 +24,39 @@ class Settings:
             tts_language=os.getenv("ASTRA_TTS_LANGUAGE", cls.tts_language),
             voice=os.getenv("ASTRA_VOICE", cls.voice),
             port=int(os.getenv("ASTRA_PORT", cls.port)),
+            tailnet_host=os.getenv("ASTRA_TAILNET_HOST", cls.tailnet_host),
         )
+
+
+VOICES = (
+    {"name": "alba", "display_name": "Alba", "gender": "weiblich"},
+    {"name": "anna", "display_name": "Anna", "gender": "weiblich"},
+    {"name": "azelma", "display_name": "Azelma", "gender": "weiblich"},
+    {"name": "bill_boerst", "display_name": "Bill Boerst", "gender": "männlich"},
+    {"name": "caro_davy", "display_name": "Caro Davy", "gender": "weiblich"},
+    {"name": "charles", "display_name": "Charles", "gender": "männlich"},
+    {"name": "cosette", "display_name": "Cosette", "gender": "weiblich"},
+    {"name": "eponine", "display_name": "Eponine", "gender": "weiblich"},
+    {"name": "estelle", "display_name": "Estelle", "gender": "weiblich"},
+    {"name": "eve", "display_name": "Eve", "gender": "weiblich"},
+    {"name": "fantine", "display_name": "Fantine", "gender": "weiblich"},
+    {"name": "george", "display_name": "George", "gender": "männlich"},
+    {"name": "giovanni", "display_name": "Giovanni", "gender": "männlich"},
+    {"name": "jane", "display_name": "Jane", "gender": "weiblich"},
+    {"name": "javert", "display_name": "Javert", "gender": "männlich"},
+    {"name": "jean", "display_name": "Jean", "gender": "männlich"},
+    {"name": "juergen", "display_name": "Juergen", "gender": "männlich"},
+    {"name": "lola", "display_name": "Lola", "gender": "weiblich"},
+    {"name": "marius", "display_name": "Marius", "gender": "männlich"},
+    {"name": "mary", "display_name": "Mary", "gender": "weiblich"},
+    {"name": "michael", "display_name": "Michael", "gender": "männlich"},
+    {"name": "paul", "display_name": "Paul", "gender": "männlich"},
+    {"name": "peter_yearsley", "display_name": "Peter Yearsley", "gender": "männlich"},
+    {"name": "rafael", "display_name": "Rafael", "gender": "männlich"},
+    {"name": "stuart_bell", "display_name": "Stuart Bell", "gender": "männlich"},
+    {"name": "vera", "display_name": "Vera", "gender": "weiblich"},
+)
+VOICE_NAMES = frozenset(voice["name"] for voice in VOICES)
 
 
 SYSTEM_PROMPT = (
@@ -76,5 +109,8 @@ def build_request(settings: Settings, messages: list[dict]) -> dict:
     }
 
 
-def local_origin_allowed(origin: str, port: int = 7860) -> bool:
-    return origin in {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
+def local_origin_allowed(origin: str, port: int = 7860, tailnet_host: str | None = None) -> bool:
+    allowed = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
+    if tailnet_host:
+        allowed.add(f"https://{tailnet_host}")
+    return origin in allowed

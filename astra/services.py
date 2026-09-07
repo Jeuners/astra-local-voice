@@ -222,18 +222,19 @@ def next_chunk(stream):
 
 
 class LocalPocketTTSService(TTSService):
-    def __init__(self, models: Models):
+    def __init__(self, models: Models, voice_state: dict, voice_name: str):
         super().__init__(
             push_start_frame=True,
             push_stop_frames=True,
-            settings=TTSSettings(model="pocket-tts", voice=models.settings.voice, language="de"),
+            settings=TTSSettings(model="pocket-tts", voice=voice_name, language="de"),
         )
         self.models = models
+        self.voice_state = voice_state
 
     async def run_tts(self, text: str, context_id: str):
         import torch
 
-        stream = self.models.tts.generate_audio_stream(self.models.voice, text, copy_state=True)
+        stream = self.models.tts.generate_audio_stream(self.voice_state, text, copy_state=True)
 
         async def audio():
             try:

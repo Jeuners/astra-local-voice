@@ -15,9 +15,16 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from astra.core import SYSTEM_PROMPT, Settings, build_request, local_origin_allowed
+from astra.core import (
+    SYSTEM_PROMPT,
+    VOICE_NAMES,
+    VOICES,
+    Settings,
+    build_request,
+    local_origin_allowed,
+)
 from astra.inference import Models, on_executor
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,13 +33,21 @@ ROOT = Path(__file__).resolve().parent.parent
 class Offer(BaseModel):
     sdp: str = Field(min_length=10, max_length=65536)
     type: Literal["offer"]
+    voice: str | None = None
+
+    @field_validator("voice")
+    @classmethod
+    def voice_must_be_known(cls, value: str | None) -> str | None:
+        if value is not None and value not in VOICE_NAMES:
+            raise ValueError("Unbekannte Stimme")
+        return value
 
 
 class Disconnect(BaseModel):
     pc_id: str = Field(max_length=100)
 
 
-async def run_voice(connection, models, config):
+async def run_voice(connection, models, config, voice_state, voice_name):
     from pipecat.audio.vad.silero import SileroVADAnalyzer
     from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.frames.frames import (
@@ -107,7 +122,7 @@ async def run_voice(connection, models, config):
     )
     stt = NemotronSTTService(models, notify)
     llm = NativeOllamaService(config, notify)
-    tts = LocalPocketTTSService(models)
+    tts = LocalPocketTTSService(models, voice_state, voice_name)
     pipeline = Pipeline(
         [
             transport.input(),
@@ -192,6 +207,7 @@ def create_app(config=None, *, load_models=True):
             await on_executor(models.stt_executor, models.load_stt)
             status["stage"] = "Deutsche Stimme wird geladen"
             await on_executor(models.tts_executor, models.load_tts)
+            await on_executor(models.tts_executor, models.get_voice, config.voice)
             status["stage"] = "Qwen wird vorbereitet"
             async with httpx.AsyncClient(timeout=180) as client:
                 payload = build_request(config, [{"role": "user", "content": "Sage Hallo."}])
@@ -237,10 +253,13 @@ def create_app(config=None, *, load_models=True):
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        if request.url.hostname not in {"localhost", "127.0.0.1"}:
+        allowed_hosts = {"localhost", "127.0.0.1"}
+        if config.tailnet_host:
+            allowed_hosts.add(config.tailnet_host)
+        if request.url.hostname not in allowed_hosts:
             return JSONResponse({"detail": "Nur lokal erreichbar"}, status_code=403)
         if request.method == "POST" and not local_origin_allowed(
-            request.headers.get("origin", ""), config.port
+            request.headers.get("origin", ""), config.port, config.tailnet_host
         ):
             return JSONResponse({"detail": "Ungültiger Ursprung"}, status_code=403)
         response = await call_next(request)
@@ -261,6 +280,10 @@ def create_app(config=None, *, load_models=True):
     async def health():
         return {**status, "busy": bool(sessions), "model": config.model, "thinking": False}
 
+    @app.get("/api/voices")
+    async def voices():
+        return {"voices": list(VOICES), "default": config.voice}
+
     @app.post("/api/offer")
     async def offer(body: Offer):
         if not status["ready"]:
@@ -270,6 +293,8 @@ def create_app(config=None, *, load_models=True):
                 raise HTTPException(
                     409, "Ein Gespräch läuft bereits. Beende es im anderen Fenster."
                 )
+            voice_name = body.voice or config.voice
+            voice_state = await on_executor(models.tts_executor, models.get_voice, voice_name)
             from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
             connection = SmallWebRTCConnection(ice_servers=[], connection_timeout_secs=20)
@@ -281,7 +306,7 @@ def create_app(config=None, *, load_models=True):
 
             async def session():
                 try:
-                    await run_voice(connection, models, config)
+                    await run_voice(connection, models, config, voice_state, voice_name)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:

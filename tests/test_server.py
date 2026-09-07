@@ -34,6 +34,27 @@ def test_unready_returns_actionable_status_and_invalid_sdp_is_rejected():
         assert response.json()["detail"]
 
 
+def test_voices_endpoint_lists_selectable_voices():
+    with TestClient(create_app(load_models=False), base_url="http://localhost:7860") as client:
+        response = client.get("/api/voices")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["default"] == "alba"
+        names = {voice["name"] for voice in body["voices"]}
+        assert "alba" in names
+        assert all({"name", "display_name", "gender"} <= voice.keys() for voice in body["voices"])
+
+
+def test_offer_rejects_unknown_voice():
+    with TestClient(create_app(load_models=False), base_url="http://localhost:7860") as client:
+        response = client.post(
+            "/api/offer",
+            headers={"Origin": "http://localhost:7860"},
+            json={"sdp": "a" * 20, "type": "offer", "voice": "not-a-real-voice"},
+        )
+        assert response.status_code == 422
+
+
 def test_disconnect_is_idempotent_and_host_is_checked():
     with TestClient(create_app(load_models=False), base_url="http://localhost:7860") as client:
         response = client.post(

@@ -18,6 +18,10 @@
       <div class="live-status"><span id="state-dot"></span><p id="status" role="status" aria-live="polite">Modelle werden vorbereitet …</p></div>
       <p id="partial" class="partial" aria-live="off"></p>
       <p id="error" class="error" role="alert" hidden></p>
+      <div class="voice-picker">
+        <label for="voice">Stimme</label>
+        <select id="voice" disabled></select>
+      </div>
       <div class="controls"><button id="connect" class="primary" disabled><span aria-hidden="true">◉</span> Gespräch starten</button><button id="mute" class="secondary" hidden aria-pressed="false">Mikrofon pausieren</button></div>
       <p class="hint" id="hint">Mikrofon wird erst nach dem Start freigegeben.</p>
     </section>

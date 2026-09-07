@@ -12,12 +12,16 @@ Drei lokale Modelle, verbunden über eine [Pipecat](https://github.com/pipecat-a
 |---|---|---|
 | Spracherkennung | Nemotron ASR (streaming) | MLX, on-device |
 | Sprachmodell | Qwen 3.5 | über natives Ollama `/api/chat` |
-| Sprachausgabe | Pocket TTS, Stimme „alba" | MLX, on-device |
+| Sprachausgabe | Pocket TTS, 26 deutsche Stimmen wählbar | MLX, on-device |
 
 Der Browser spricht per WebRTC direkt mit einem FastAPI-Server auf
 `localhost:7860`. Der Server ist bewusst nur lokal erreichbar: Host- und
 Origin-Prüfung auf jedem Request, strikte Content-Security-Policy, keine
 offenen Ports nach außen.
+
+Die Stimme lässt sich im UI per Dropdown wählen (`/api/voices` listet alle
+26, Auswahl wird im Browser gemerkt). Jede Stimme wird beim ersten Gebrauch
+lazy geladen und danach für die Laufzeit des Prozesses gecacht.
 
 ## Starten
 
@@ -42,6 +46,7 @@ gezogen sein. Die Seite öffnen, Mikrofon erlauben, sprechen.
 | `ASTRA_TTS_LANGUAGE` | `german` |
 | `ASTRA_VOICE` | `alba` |
 | `ASTRA_PORT` | `7860` |
+| `ASTRA_TAILNET_HOST` | *(leer)* — z. B. `minim4-1.tail0f2cb2.ts.net` |
 
 ## Tests
 
@@ -50,9 +55,25 @@ uv run pytest
 uv run ruff check .
 ```
 
+## Im Tailnet freigeben
+
+Standardmäßig nur `localhost` erreichbar. Für Zugriff von einem anderen
+Gerät im selben Tailscale-Netz:
+
+```bash
+tailscale serve --bg 7860
+ASTRA_TAILNET_HOST="$(tailscale status --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')" \
+  uv run python -m astra.server
+```
+
+Danach ist die Seite unter `https://<tailnet-host>/` erreichbar (Port 443,
+implizit — Tailscale terminiert TLS und proxyt auf 7860). Host- und
+Origin-Prüfung lassen dann zusätzlich diesen einen Hostnamen durch.
+
 ## Sicherheit
 
-- Nur `localhost`/`127.0.0.1` erreichbar, alle anderen Hosts bekommen 403
+- Nur `localhost`/`127.0.0.1` (bzw. der optionale Tailnet-Host) erreichbar,
+  alle anderen Hosts bekommen 403
 - POST-Requests werden gegen den erwarteten Origin geprüft
 - `think` ist im Ollama-Request hart auf `false` gesetzt — die Pipeline
   wirft, falls das Modell trotzdem Denkausgabe liefert

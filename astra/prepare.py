@@ -27,13 +27,14 @@ async def main():
         await on_executor(models.stt_executor, recognizer.push, bytes(16000), True)
         print("Nemotron bereit. Lade deutsche Pocket-TTS-Stimme …", flush=True)
         await on_executor(models.tts_executor, models.load_tts)
+        voice_state = await on_executor(models.tts_executor, models.get_voice, settings.voice)
 
         def synthesize():
             start = time.monotonic()
             chunks = []
             first_ms = None
             for chunk in models.tts.generate_audio_stream(
-                models.voice,
+                voice_state,
                 "Hallo, ich bin Astra. Ich laufe vollständig auf deinem Mac.",
                 copy_state=True,
             ):

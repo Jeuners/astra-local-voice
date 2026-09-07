@@ -61,11 +61,33 @@ async function waitIce(pc) {
     check();
   });
 }
+async function loadVoices() {
+  try {
+    const response = await fetch("/api/voices", {signal: AbortSignal.timeout(5000)});
+    const data = await response.json();
+    const groups = {weiblich: document.createElement("optgroup"), männlich: document.createElement("optgroup")};
+    groups.weiblich.label = "Weiblich";
+    groups.männlich.label = "Männlich";
+    for (const voice of data.voices) {
+      const option = document.createElement("option");
+      option.value = voice.name;
+      option.textContent = voice.display_name;
+      groups[voice.gender]?.append(option);
+    }
+    $("voice").replaceChildren(groups.weiblich, groups.männlich);
+    const saved = localStorage.getItem("astra-voice");
+    $("voice").value = data.voices.some(v => v.name === saved) ? saved : data.default;
+  } catch { showError("Stimmenliste konnte nicht geladen werden."); }
+}
+$("voice").addEventListener("change", () => {
+  try { localStorage.setItem("astra-voice", $("voice").value); } catch { /* ignore */ }
+});
 async function connect() {
   if (connecting || peer) return;
   connecting = true;
   $("error").hidden = true;
   $("connect").disabled = true;
+  $("voice").disabled = true;
   state("Mikrofon wird verbunden …");
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Bitte diese Seite unter http://localhost:7860 öffnen.");
@@ -94,7 +116,7 @@ async function connect() {
     };
     await pc.setLocalDescription(await pc.createOffer());
     await waitIce(pc);
-    const answer = await request("/api/offer", {sdp: pc.localDescription.sdp, type: "offer"});
+    const answer = await request("/api/offer", {sdp: pc.localDescription.sdp, type: "offer", voice: $("voice").value});
     pcId = answer.pc_id;
     await pc.setRemoteDescription({sdp: answer.sdp, type: answer.type});
     $("connect").textContent = "Gespräch beenden";
@@ -129,6 +151,7 @@ async function disconnect() {
   output.pause();
   output.srcObject = null;
   muted = false;
+  $("voice").disabled = !ready;
   $("mute").hidden = true;
   $("mute").setAttribute("aria-pressed", "false");
   $("mute").textContent = "Mikrofon pausieren";
@@ -167,12 +190,14 @@ async function poll() {
     ready = status.ready;
     if (!peer && !connecting) {
       $("connect").disabled = !ready;
+      $("voice").disabled = !ready;
       state(ready ? "Bereit, wenn du es bist." : status.stage);
       if (status.error) showError(status.error);
     }
   } catch {
     ready = false;
-    if (!peer) { $("connect").disabled = true; state("Lokaler Server nicht erreichbar."); }
+    if (!peer) { $("connect").disabled = true; $("voice").disabled = true; state("Lokaler Server nicht erreichbar."); }
   } finally { setTimeout(poll, ready ? 5000 : 1500); }
 }
 void poll();
+void loadVoices();
